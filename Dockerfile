@@ -14,7 +14,7 @@ ENV PATH="/root/.local/bin:$PATH"
 WORKDIR /app
 
 # Копируем файлы проекта
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md uv.lock ./
 
 # Синхронизация зависимостей без dev-зависимостей
 RUN uv sync --frozen --no-dev

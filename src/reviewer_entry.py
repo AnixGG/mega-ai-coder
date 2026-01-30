@@ -1,6 +1,5 @@
 import os
 import sys
-import json
 from src.core.github_client import GithubClient
 from src.agents.reviewer import ReviewerAgent
 from src.logger import log
