@@ -43,7 +43,7 @@ def main():
 
     failed_ci = get_ci_status(pr)
     if failed_ci:
-        error_msg = "CI Checks Failed:\n" + "\n".join(failed_ci)
+        error_msg = "## ❌ CI Checks Failed\n\n" + "\n".join(failed_ci)
         pr.create_issue_comment(error_msg)
         sys.exit(1)
 
@@ -60,10 +60,10 @@ def main():
     log.info(f"Summary: {result.general_summary}")
 
     if result.action == "REQUEST_CHANGES":
-        pr.create_issue_comment(f"## ❌ AI Review: Changes Requested\n\n{result.general_summary}")
+        pr.create_issue_comment(f"##AI Review: Changes Requested\n\n{result.general_summary}")
         sys.exit(1)
     else:
-        pr.create_issue_comment(f"## ✅ AI Review: Approved\n\n{result.general_summary}")
+        pr.create_issue_comment(f"##AI Review: Approved\n\n{result.general_summary}")
 
 
 if __name__ == "__main__":
