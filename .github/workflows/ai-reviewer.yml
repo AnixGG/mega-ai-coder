@@ -36,6 +36,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}/agent_brain
           TARGET_PROJECT_PATH: ${{ github.workspace }}/target_project
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_NAME: ${{ github.repository }}
         run: |
           cd agent_brain
           uv run python -m src.reviewer_entry
