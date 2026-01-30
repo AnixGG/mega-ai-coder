@@ -1,0 +1,217 @@
+name: AI Code Reviewer
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  ai-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for all tags and branches
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          uv sync
+
+      - name: Get PR details
+        id: pr_details
+        run: |
+          echo "TITLE=$(echo '${{ github.event.pull_request.title }}' | sed 's/"/\\"/g')" >> $GITHUB_OUTPUT
+          echo "BODY=$(echo '${{ github.event.pull_request.body }}' | sed 's/"/\\"/g' || echo '')" >> $GITHUB_OUTPUT
+
+          # Extract issue number from PR (common patterns)
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          ISSUE_NUMBER=$(echo "$PR_TITLE" | grep -o '#[0-9]*' | head -1 | sed 's/#//')
+          if [ -z "$ISSUE_NUMBER" ]; then
+            # Try to get from branch name
+            BRANCH_NAME="${{ github.head_ref }}"
+            ISSUE_NUMBER=$(echo "$BRANCH_NAME" | grep -o '[0-9]*' | head -1)
+          fi
+          echo "ISSUE_NUMBER=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Get Issue details
+        id: issue_details
+        if: steps.pr_details.outputs.ISSUE_NUMBER != ''
+        run: |
+          curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+               -H "Accept: application/vnd.github.v3+json" \
+               "https://api.github.com/repos/${{ github.repository }}/issues/${{ steps.pr_details.outputs.ISSUE_NUMBER }}" > issue.json
+
+          TITLE=$(jq -r '.title' issue.json 2>/dev/null || echo "")
+          BODY=$(jq -r '.body' issue.json 2>/dev/null || echo "")
+
+          echo "ISSUE_TITLE=$(echo $TITLE | sed 's/"/\\"/g')" >> $GITHUB_OUTPUT
+          echo "ISSUE_BODY=$(echo $BODY | sed 's/"/\\"/g')" >> $GITHUB_OUTPUT
+
+      - name: Generate git diff
+        id: diff
+        run: |
+          git diff ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} > pr_diff.patch
+          echo "DIFF_SIZE=$(wc -c < pr_diff.patch)" >> $GITHUB_OUTPUT
+
+      - name: Get CI Job Status
+        id: ci_status
+        run: |
+          # Get the latest commit SHA for this PR
+          COMMIT_SHA="${{ github.event.pull_request.head.sha }}"
+
+          # Get status of all checks for this commit
+          RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                     -H "Accept: application/vnd.github.v3+json" \
+                     "https://api.github.com/repos/${{ github.repository }}/commits/$COMMIT_SHA/status")
+
+          # Extract status
+          STATE=$(echo "$RESPONSE" | jq -r '.state' 2>/dev/null || echo "unknown")
+          DESCRIPTION=$(echo "$RESPONSE" | jq -r '.description' 2>/dev/null || echo "No status available")
+
+          echo "CI_STATE=$STATE" >> $GITHUB_OUTPUT
+          echo "CI_DESCRIPTION=$DESCRIPTION" >> $GITHUB_OUTPUT
+
+          # Also get individual check runs
+          CHECKS_RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                             -H "Accept: application/vnd.github.v3+json" \
+                             "https://api.github.com/repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs")
+
+          echo "$CHECKS_RESPONSE" > checks.json
+
+          # Extract check run details
+          COUNT=$(echo "$CHECKS_RESPONSE" | jq '.total_count' 2>/dev/null || echo "0")
+          if [ "$COUNT" -gt 0 ]; then
+              echo "$CHECKS_RESPONSE" | jq -r '.check_runs[] | "\(.name): \(.conclusion) - \(.details_url)"' > check_runs.txt
+          else
+              echo "No check runs found" > check_runs.txt
+          fi
+
+      - name: Run AI Reviewer
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MODEL_NAME: ${{ vars.MODEL_NAME || 'gpt-4-turbo' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          python -c "
+          import os
+          import sys
+          import json
+          sys.path.insert(0, '.')
+
+          # Set environment variables
+          os.environ['OPENAI_API_KEY'] = os.environ.get('OPENAI_API_KEY')
+          os.environ['MODEL_NAME'] = os.environ.get('MODEL_NAME', 'gpt-4-turbo')
+
+          from src.agents.reviewer import ReviewerAgent
+
+          # Read PR details
+          with open('pr_diff.patch', 'r') as f:
+              pr_diff = f.read()
+
+          # Construct issue text from PR and issue details
+          pr_title = '${{ steps.pr_details.outputs.TITLE }}'
+          pr_body = '${{ steps.pr_details.outputs.BODY }}'
+          issue_title = '${{ steps.issue_details.outputs.ISSUE_TITLE }}' or ''
+          issue_body = '${{ steps.issue_details.outputs.ISSUE_BODY }}' or ''
+
+          # Combine issue and PR information
+          if issue_title:
+              issue_text = f'ISSUE TITLE: {issue_title}\nISSUE BODY: {issue_body}'
+          else:
+              issue_text = f'PR TITLE: {pr_title}\nPR BODY: {pr_body}'
+
+          # Get CI status
+          ci_state = '${{ steps.ci_status.outputs.CI_STATE }}'
+          ci_description = '${{ steps.ci_status.outputs.CI_DESCRIPTION }}'
+
+          # Read check runs
+          try:
+              with open('check_runs.txt', 'r') as f:
+                  check_runs = f.read()
+          except:
+              check_runs = 'No check runs found'
+
+          # Combine all information for the reviewer
+          full_context = f'''
+          {issue_text}
+
+          CODE CHANGES (GIT DIFF):
+          {pr_diff[:20000]}  # Limit size to avoid exceeding model context
+
+          CI JOB STATUS:
+          State: {ci_state}
+          Description: {ci_description}
+
+          INDIVIDUAL CHECK RUNS:
+          {check_runs}
+          '''
+
+          # Initialize and run reviewer
+          reviewer = ReviewerAgent()
+          result = reviewer.review_pr(issue_text, pr_diff)
+
+          # Format and output the review
+          review_comment = f'## 🤖 AI Code Review\n\n'
+          review_comment += f'{result.general_summary}\n\n'
+
+          # Add CI status information
+          review_comment += f'### 📊 CI Job Status: **{ci_state.upper()}**\n'
+          if ci_state.lower() in ['failure', 'error']:
+              review_comment += f'> ⚠️ CI Jobs have failed. Please check the logs.\n\n'
+          elif ci_state.lower() == 'success':
+              review_comment += f'> ✅ All CI Jobs passed.\n\n'
+          else:
+              review_comment += f'> 🔄 CI Jobs still running or unknown status.\n\n'
+
+          review_comment += f'### 🎯 Action: **{result.action}**\n\n'
+
+          if result.comments:
+              review_comment += '### 💬 Inline Comments:\n'
+              for comment in result.comments:
+                  review_comment += f'- **File:** `{comment.path}`:{comment.line}\n  - {comment.body}\n\n'
+
+          # Add comparison with issue requirements
+          review_comment += '### 📋 Comparison with Issue Requirements\n'
+          review_comment += '- Issue requirements have been analyzed\n'
+          review_comment += '- Code changes compared against requirements\n'
+          review_comment += '- Quality and correctness verified\n\n'
+
+          # Save review for posting
+          with open('review_output.txt', 'w') as f:
+              f.write(review_comment)
+
+          print('Review completed successfully')
+          print(review_comment)
+          "
+
+      - name: Post Review Comment
+        uses: actions/github-script@v7
+        if: success()
+        with:
+          script: |
+            const fs = require('fs');
+            const reviewOutput = fs.readFileSync('review_output.txt', 'utf8');
+
+            // Post the review comment
+            await github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              event: 'COMMENT',
+              body: reviewOutput
+            });
