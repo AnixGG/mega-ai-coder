@@ -29,7 +29,9 @@ jobs:
       - name: Run Reviewer
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          MODEL_NAME: ${{ secrets.MODEL_NAME }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
           PYTHONPATH: ${{ github.workspace }}/agent_brain
           TARGET_PROJECT_PATH: ${{ github.workspace }}/target_project
