@@ -1,9 +1,11 @@
 import os
+import time
 from src.core.github_client import GithubClient
 from src.core.local_git import LocalGit
 from src.agents.coder import CoderAgent
 from src.core.context import work_dir_context
 from src.logger import log
+
 
 class PipelineRunner:
     def __init__(self, repo_name: str, issue_number: int):
@@ -39,21 +41,51 @@ class PipelineRunner:
             base=self.local_git.default_branch,
         )
         log.info(f"PR Created: {pr.html_url}")
+        return pr
 
     def run(self, feedback=""):
         log.debug("--- Starting environment ---")
-
         token = work_dir_context.set(self.workspace_path)
-
         log.debug(f"Environment Started: {self.workspace_path}")
 
         try:
             issue, branch_name = self._setup()
-
             task_description = f"Title: {issue.title}\nBody: {issue.body}"
+            current_feedback = feedback
 
-            self.agent.run(task_description, feedback=feedback)
+            for iteration in range(5):
+                log.info(f"Iteration {iteration + 1} started")
+                self.agent.run(task_description, feedback=current_feedback)
 
-            self._teardown(issue, branch_name)
+                # Push changes and get PR
+                pr = self._teardown(issue, branch_name)
+
+                # Polling for reviewer with 5 min timeout
+                start_wait = time.time()
+                review_received = False
+
+                while time.time() - start_wait < 300:
+                    pr.update()
+                    reviews = list(pr.get_reviews())
+
+                    if reviews:
+                        last_review = reviews[-1]
+                        if last_review.state == "APPROVED":
+                            log.info("PR Approved by reviewer.")
+                            return
+
+                        if last_review.state == "CHANGES_REQUESTED":
+                            log.info(f"Changes requested: {last_review.body}")
+                            current_feedback = last_review.body
+                            review_received = True
+                            break
+
+                    log.debug("Waiting for AI Reviewer...")
+                    time.sleep(30)
+
+                if not review_received:
+                    log.error("Reviewer timeout (5 minutes reached). Shutting down.")
+                    break
+
         finally:
             work_dir_context.reset(token)

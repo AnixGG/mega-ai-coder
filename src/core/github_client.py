@@ -4,7 +4,7 @@ from src.core.config import settings
 
 class GithubClient:
     def __init__(self):
-        self.client = Github(settings.GITHUB_TOKEN)
+        self.client = Github(settings.GH_TOKEN)
 
     def get_repo(self, repo_name: str):
         return self.client.get_repo(repo_name)
