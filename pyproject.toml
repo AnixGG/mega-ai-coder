@@ -1,0 +1,40 @@
+[project]
+name = "mega-ai-coder"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.128.0",
+    "gitpython>=3.1.46",
+    "langchain-openai>=1.1.7",
+    "langgraph>=1.0.7",
+    "pathspec>=1.0.4",
+    "pydantic-settings>=2.12.0",
+    "pygithub>=2.8.1",
+    "python-dotenv>=1.2.1",
+    "tree-sitter>=0.25.2",
+    "tree-sitter-languages>=1.10.2",
+    "typer>=0.21.1",
+    "deepeval>=3.8.2",
+]
+
+[dependency-groups]
+dev = [
+    "black>=26.1.0",
+    "mypy>=1.19.1",
+    "pytest>=9.0.2",
+    "ruff>=0.14.14",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["test_agent"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--disable-warnings",
+    "--tb=short"
+]

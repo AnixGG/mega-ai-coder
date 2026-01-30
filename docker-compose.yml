@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  agent:
+    build: .
+    image: coding-agent-cli
+    volumes:
+      - ./workspace:/app/workspace
+      - ./.env:/app/.env
+    stdin_open: true
+    tty: true
