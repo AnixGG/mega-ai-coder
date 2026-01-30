@@ -1,21 +1,45 @@
 import os
 import sys
+import json
 from src.core.github_client import GithubClient
 from src.agents.reviewer import ReviewerAgent
 from src.logger import log
 
 
+def get_ci_status_from_actions():
+    ci_passed = os.getenv("CI_PASSED", "false").lower() == "true"
+    ci_has_failures = os.getenv("CI_HAS_FAILURES", "true").lower() == "true"
+    ci_status = os.getenv("CI_STATUS", "unknown")
+
+    if ci_passed:
+        return []
+    elif ci_status == "pending":
+        return ["CI checks are still pending."]
+    elif ci_has_failures:
+        return ["Some CI checks have failed. Check GitHub Actions for details."]
+    else:
+        return []
+
+
 def get_ci_status(pr):
     log.info(f"Reviewer: getting CI Status for PR {pr.number}...")
-    head_commit = pr.get_commits().reversed[0]
-    check_runs = head_commit.get_check_runs()
 
-    failed_logs = []
-    for check in check_runs:
-        if check.conclusion == "failure":
-            failed_logs.append(f"Job '{check.name}' FAILED.")
+    ci_from_actions = get_ci_status_from_actions()
+    if ci_from_actions:
+        return ci_from_actions
 
-    return failed_logs
+    try:
+        head_commit = pr.get_commits().reversed[0]
+        check_runs = head_commit.get_check_runs()
+        failed_logs = []
+        for check in check_runs:
+            if check.conclusion == "failure":
+                failed_logs.append(f"Job '{check.name}' FAILED.")
+        return failed_logs
+    except Exception as e:
+        log.warning(f"Could not fetch CI status via API: {e}")
+        return []
+
 
 def main():
     repo_name = os.getenv("REPO_NAME")
@@ -62,7 +86,6 @@ def main():
             )
         except Exception as e:
             log.error(f"Could not post comment on {comment.path}:{comment.line} - {e}")
-
 
     if result.action == "REQUEST_CHANGES":
         pr.create_review(event="REQUEST_CHANGES", body=result.general_summary)
