@@ -2,7 +2,7 @@ import os
 import sys
 from src.core.github_client import GithubClient
 from src.agents.reviewer import ReviewerAgent
-from logger import log
+from src.logger import log
 
 
 def get_ci_status(pr):
