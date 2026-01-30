@@ -1,22 +1,31 @@
-FROM python:3.11-slim AS base
+FROM python:3.11-slim
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       git gcc curl \
+# Установка системных зависимостей (особенно для tree-sitter и gitpython)
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
+
+# Установка uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
 
 WORKDIR /app
 
-# Копируем файлы зависимостей
-COPY pyproject.toml uv.lock ./
+# Копируем файлы проекта
+COPY pyproject.toml README.md ./
 
-# Устанавливаем uv и зависимости
-RUN pip install --no-cache-dir uv \
-    && uv venv \
-    && .venv/bin/pip install --no-cache-dir -e .
+# Синхронизация зависимостей без dev-зависимостей
+RUN uv sync --frozen --no-dev
 
 # Копируем исходный код
-COPY . .
+COPY src/ ./src/
 
-# Используем виртуальное окружение для запуска
-CMD ["/app/.venv/bin/python", "-m", "src.main"]
+# Настройка окружения
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app/src:$PYTHONPATH"
+
+ENTRYPOINT ["python", "-m", "src.main"]
+
+CMD ["--help"]
