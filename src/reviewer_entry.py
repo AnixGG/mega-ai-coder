@@ -25,19 +25,7 @@ def get_ci_status(pr):
 
     except Exception as e:
         log.warning(f"Could not fetch CI status: {e}")
-
-        # Fallback к старому методу
-        try:
-            head_commit = pr.get_commits().reversed[0]
-            check_runs = head_commit.get_check_runs()
-            failed_logs = []
-            for check in check_runs:
-                if check.conclusion == "failure":
-                    failed_logs.append(f"Job '{check.name}' FAILED.")
-            return failed_logs
-        except Exception as e2:
-            log.error(f"Both CI status methods failed: {e2}")
-            return ["Could not determine CI status"]
+        return []
 
 
 def main():
@@ -57,7 +45,6 @@ def main():
     if failed_ci:
         error_msg = "CI Checks Failed:\n" + "\n".join(failed_ci)
         pr.create_issue_comment(error_msg)
-        pr.create_review(event="REQUEST_CHANGES", body="CI Failed. Please fix tests.")
         sys.exit(1)
 
     task_description = f"{pr.title}\n{pr.body}"
@@ -72,25 +59,11 @@ def main():
     log.info(f"Verdict: {result.action}")
     log.info(f"Summary: {result.general_summary}")
 
-    pr.create_issue_comment(f"## AI Review Result: {result.action}\n\n{result.general_summary}")
-    last_commit = list(pr.get_commits())[-1]
-
-    for comment in result.comments:
-        try:
-            pr.create_review_comment(
-                body=comment.body,
-                commit=last_commit,
-                path=comment.path,
-                line=comment.line
-            )
-        except Exception as e:
-            log.error(f"Could not post comment on {comment.path}:{comment.line} - {e}")
-
     if result.action == "REQUEST_CHANGES":
-        pr.create_review(event="REQUEST_CHANGES", body=result.general_summary)
+        pr.create_issue_comment(f"## ❌ AI Review: Changes Requested\n\n{result.general_summary}")
         sys.exit(1)
     else:
-        pr.create_review(event="APPROVE")
+        pr.create_issue_comment(f"## ✅ AI Review: Approved\n\n{result.general_summary}")
 
 
 if __name__ == "__main__":

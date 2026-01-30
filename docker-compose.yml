@@ -9,3 +9,8 @@ services:
       - ./.env:/app/.env
     stdin_open: true
     tty: true
+    environment:
+      - GH_TOKEN=${GH_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MODEL_NAME=${MODEL_NAME}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL}
