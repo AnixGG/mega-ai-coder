@@ -1,88 +1,9 @@
 name: AI Reviewer Launch
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-  workflow_run:
-    workflows: ["CI", "Test", "Build"]  # Основные workflow, можете добавить или удалить
-    types:
-      - completed
+on: [pull_request]
 
 jobs:
-  check-ci-status:
-    if: github.event_name == 'workflow_run'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      statuses: read
-
-    outputs:
-      ci_passed: ${{ steps.check-ci.outputs.ci_passed }}
-      ci_details: ${{ steps.check-ci.outputs.ci_details }}
-
-    steps:
-      - name: Check CI Status
-        id: check-ci
-        uses: actions/github-script@v7
-        with:
-          script: |
-            try {
-              // Получаем комбинированный статус для коммита
-              const { data: status } = await github.rest.repos.getCombinedStatusForRef({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                ref: '${{ github.event.workflow_run.head_sha }}'
-              });
-              
-              console.log('CI Status:', status.state);
-              
-              // Получаем детали по всем workflow runs
-              const { data: runs } = await github.rest.actions.listWorkflowRuns({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                branch: '${{ github.event.workflow_run.head_branch }}',
-                event: 'pull_request',
-                per_page: 10
-              });
-              
-              const workflowRuns = runs.workflow_runs.filter(run => 
-                run.head_sha === '${{ github.event.workflow_run.head_sha }}'
-              );
-              
-              // Собираем детали
-              const ciDetails = {
-                overall_status: status.state,
-                total_checks: status.total_count,
-                successful: status.statuses.filter(s => s.state === 'success').length,
-                pending: status.statuses.filter(s => s.state === 'pending').length,
-                failed: status.statuses.filter(s => s.state === 'failure' || s.state === 'error').length,
-                workflows: workflowRuns.map(run => ({
-                  name: run.name,
-                  status: run.conclusion,
-                  url: run.html_url
-                }))
-              };
-              
-              console.log('CI Details:', JSON.stringify(ciDetails, null, 2));
-              
-              // Сохраняем результаты в outputs
-              core.setOutput('ci_passed', status.state === 'success');
-              core.setOutput('ci_details', JSON.stringify(ciDetails));
-              
-              return ciDetails;
-              
-            } catch (error) {
-              console.error('Error checking CI status:', error);
-              core.setOutput('ci_passed', 'false');
-              core.setOutput('ci_details', JSON.stringify({ error: error.message }));
-              return { error: error.message };
-            }
-
   review:
     runs-on: ubuntu-latest
-    needs: check-ci-status
-    if: |
-      github.event_name == 'pull_request' || 
-      (github.event_name == 'workflow_run' && needs.check-ci-status.outputs.ci_passed == 'true')
 
     steps:
       - name: Checkout Target Project
@@ -112,24 +33,9 @@ jobs:
 
           PYTHONPATH: ${{ github.workspace }}/agent_brain
           TARGET_PROJECT_PATH: ${{ github.workspace }}/target_project
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO_NAME: ${{ github.repository }}
 
-          # Передаем CI статус в Python скрипт
-          CI_PASSED: ${{ needs.check-ci-status.outputs.ci_passed }}
-          CI_DETAILS: ${{ needs.check-ci-status.outputs.ci_details }}
-
         run: |
-          echo "CI Status: $CI_PASSED"
-          echo "CI Details: $CI_DETAILS"
-          
           cd agent_brain
-          
-          # Запускаем reviewer с учетом CI статуса
-          if [ "$CI_PASSED" = "true" ]; then
-            echo "✅ All CI checks passed, proceeding with review..."
-            uv run python -m src.reviewer_entry --ci-passed
-          else
-            echo "⚠️ CI checks failed or pending"
-            uv run python -m src.reviewer_entry
-          fi
+          uv run python -m src.reviewer_entry

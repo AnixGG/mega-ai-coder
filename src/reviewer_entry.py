@@ -5,39 +5,39 @@ from src.agents.reviewer import ReviewerAgent
 from src.logger import log
 
 
-def get_ci_status_from_actions():
-    ci_passed = os.getenv("CI_PASSED", "false").lower() == "true"
-    ci_has_failures = os.getenv("CI_HAS_FAILURES", "true").lower() == "true"
-    ci_status = os.getenv("CI_STATUS", "unknown")
-
-    if ci_passed:
-        return []
-    elif ci_status == "pending":
-        return ["CI checks are still pending."]
-    elif ci_has_failures:
-        return ["Some CI checks have failed. Check GitHub Actions for details."]
-    else:
-        return []
-
-
 def get_ci_status(pr):
     log.info(f"Reviewer: getting CI Status for PR {pr.number}...")
 
-    ci_from_actions = get_ci_status_from_actions()
-    if ci_from_actions:
-        return ci_from_actions
-
     try:
-        head_commit = pr.get_commits().reversed[0]
-        check_runs = head_commit.get_check_runs()
-        failed_logs = []
-        for check in check_runs:
-            if check.conclusion == "failure":
-                failed_logs.append(f"Job '{check.name}' FAILED.")
-        return failed_logs
+        repo = pr.base.repo
+        commit = repo.get_commit(pr.head.sha)
+        status = commit.get_combined_status()
+
+        if status.state == "success":
+            return []
+        elif status.state == "failure":
+            failed_statuses = [s.context for s in status.statuses if s.state == "failure"]
+            return [f"CI check failed: {ctx}" for ctx in failed_statuses]
+        elif status.state == "pending":
+            return ["CI checks are still pending."]
+        else:
+            return [f"CI status: {status.state}"]
+
     except Exception as e:
-        log.warning(f"Could not fetch CI status via API: {e}")
-        return []
+        log.warning(f"Could not fetch CI status: {e}")
+
+        # Fallback к старому методу
+        try:
+            head_commit = pr.get_commits().reversed[0]
+            check_runs = head_commit.get_check_runs()
+            failed_logs = []
+            for check in check_runs:
+                if check.conclusion == "failure":
+                    failed_logs.append(f"Job '{check.name}' FAILED.")
+            return failed_logs
+        except Exception as e2:
+            log.error(f"Both CI status methods failed: {e2}")
+            return ["Could not determine CI status"]
 
 
 def main():
