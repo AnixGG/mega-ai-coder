@@ -16,7 +16,7 @@ jobs:
         with:
           repository: AnixGG/mega-ai-coder
           path: agent_brain
-          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          token: ${{ secrets.GH_TOKEN }}
 
 
       - name: Install uv and dependencies
